@@ -4,12 +4,26 @@ const Order = require('../models/orderModel');
 const getAllOrders = (req, res) => {
   const limit = req.query.limit;
   const paging = req.query.paging;
-  Order.getAll(limit,paging,(err, results) => {
+  Order.getAll(limit, paging, (err, results) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
+    res.setHeader('Content-Type', 'application/json');
     res.json(results);
   });
+};
+
+const closeOrder =(req, res)=>{
+  const id = req.params.id;
+  Order.closeOrder(id, (err,result)=>{
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.status(201).json({ 
+      code:201,
+      message: "Order is closed"
+     });
+  })
 };
 
 const getOrderById = (req, res) => {
@@ -28,12 +42,9 @@ const getOrderById = (req, res) => {
 const createOrder = (req, res) => {
   const newOrder = req.body;
   Order.create(newOrder, (err, result) => {
-    console.log(result);
-    
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    // res.status(201).json({ id: result.insertId, ...newOrder });
     res.status(201).json({ 
       code:201,
       message: "Create order successfully"
@@ -45,12 +56,9 @@ const updateOrder = (req, res) => {
   const id = req.params.id;
   const updatedOrder = req.body;
   Order.update(id, updatedOrder, (err) => {
-    console.log(err);
-    
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    console.log(res);
     res.json({ 
       code:201,
       message: "Update order successfully"
@@ -73,5 +81,6 @@ module.exports = {
   getOrderById,
   createOrder,
   updateOrder,
-  deleteOrder
+  deleteOrder,
+  closeOrder
 };

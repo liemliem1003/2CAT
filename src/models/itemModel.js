@@ -5,9 +5,7 @@ const Item = {
   getAll: (limit, paging,isGetAll, callback) => {
     limit ? limit = limit : limit = 10
     paging ? paging = paging : paging = 0
-
     const offset = limit * paging;
-
     if (isGetAll) {
       const countQuery = `SELECT COUNT(*) AS total_items FROM items_for_sale where status = 1`;
       const query = `SELECT * FROM items_for_sale where status = 1`;
@@ -26,7 +24,6 @@ const Item = {
         if (err) return callback(err);
         db.query(countQuery, (err, countResult) => {
           if (err) return callback(err);
-
           const totalItems = countResult[0].total_items;
           callback(null, { items, totalItems });
         });

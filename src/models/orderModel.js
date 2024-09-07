@@ -6,21 +6,74 @@ const Topping = require('./toppingModel')
 
 const Order = {
   getAll: (limit, paging, callback) => {
-    limit ? limit = limit : limit = 10
-    paging ? paging = paging : paging = 0
-
+    limit ? limit = limit : limit = 10;
+    paging ? paging = paging : paging = 0;
     const offset = limit * paging;
-    const query = `SELECT * FROM Orders limit  ${limit} offset ${offset}`;
-    const countQuery = `SELECT COUNT(*) AS total_orders FROM orders`;
 
-
-    db.query(query, [limit, offset], (err, orders) => {
+    const query = `SELECT * FROM Orders LIMIT ${limit} OFFSET ${offset}`;
+    console.log(query);
+    
+    const countQuery = `SELECT COUNT(*) AS total_orders FROM Orders`;
+    db.query(query, (err, orders) => {
       if (err) return callback(err);
       db.query(countQuery, (err, countResult) => {
         if (err) return callback(err);
 
-        const totalOrders = countResult[0].total_orders;
-        callback(null, { orders, totalOrders });
+        let totalOrders = countResult[0].total_orders;
+
+        // If no orders, return early
+        if (!orders.length) {
+          return callback(null, { orders, totalOrders });
+        }
+
+        let processedOrders = 0;  // Track how many orders have been processed
+        let totalItems = 0; // Track the number of items to know when all items and toppings are processed
+
+        orders.forEach((order, index) => {
+          const queryItems = `select * from order_items inner join items_for_sale on order_items.item_id = items_for_sale.item_id where order_items.order_id = ?`;
+
+          db.query(queryItems, [order.order_id], (err, items) => {
+            if (err) return callback(err);
+
+            orders[index].items = items; // Assign items to the order
+            totalItems += items.length; // Track how many items need to have toppings assigned
+
+            // If the order has no items, consider it processed
+            if (!items.length) {
+              processedOrders++;
+              if (processedOrders === orders.length && totalItems === 0) {
+                callback(null, { orders, totalOrders });
+              }
+            }
+            items.forEach((item, i) => {
+              const queryToppings = `select * from order_toppings inner join topping on order_toppings.topping_id = topping.topping_id
+                                     where order_toppings.item_id = ? and order_toppings.order_id = ?`;
+
+              db.query(queryToppings, [item.item_id, order.order_id], (err, toppings) => {
+                if (err) return callback(err);
+
+                // Assign toppings to the respective item
+                orders[index].items[i].toppings = toppings;
+
+                // Decrease totalItems after each topping query completes
+                totalItems--;
+
+                // When all toppings for all items are fetched, check if all orders are processed
+                if (totalItems === 0 && processedOrders === orders.length) {
+                  callback(null, { orders, totalOrders });
+                }
+              });
+            });
+
+            // If all items for the current order are processed
+            processedOrders++;
+            console.log(orders);
+            
+            if (processedOrders === orders.length && totalItems === 0) {
+              callback(null, { orders, totalOrders });
+            }
+          });
+        });
       });
     });
   },
@@ -38,7 +91,7 @@ const Order = {
       if (err) {
         return callback(err)
       }
-      var queryOrderItems = `select * from order_items inner join items_for_sale on order_items.item_id = items_for_sale.item_id where order_items.order_id = ${id}`
+      var queryOrderItems = `select * from order_items inner join items_for_sale on order_items.item_id = items_for_sale.item_id where order_items.order_id = ${id} and order_items.status = 1`
       db.query(queryOrderItems, (err, result) => {
         if (err) {
           return callback(err)
@@ -48,7 +101,7 @@ const Order = {
             return callback(err)
           }
           dataItems = result
-          var queryOrderToppings = `select * from order_toppings inner join topping on order_toppings.topping_id = topping.topping_id where order_toppings.order_id = ${id}`
+          var queryOrderToppings = `select * from order_toppings inner join topping on order_toppings.topping_id = topping.topping_id where order_toppings.order_id = ${id} and order_toppings.status = 1`
           db.query(queryOrderToppings, (err, result) => {
             if (err) {
               return callback(err)
@@ -87,8 +140,6 @@ const Order = {
           if (err) {
             return callback(err)
           }
-          console.log(queryOrderItems);
-
           if (orderData.toppings.length > 0) {
             var queryOrderToppings = "INSERT INTO order_toppings (topping_id,order_id,item_id,quantity,price) values "
             for (let i = 0; i < orderData.toppings.length; i++) {
@@ -96,7 +147,6 @@ const Order = {
               queryOrderToppings += value
               i < orderData.toppings.length - 1 ? queryOrderToppings += "," : true
             }
-            console.log(queryOrderToppings);
             db.query(queryOrderToppings, (err, result) => {
               if (err) {
                 return callback(err)
@@ -110,13 +160,41 @@ const Order = {
       }
     });
   },
+  closeOrder: (id, callback) => {
+    const query = `UPDATE orders SET status = 1 WHERE order_id = ${id}`;
+    db.query(query, (err, result) => {
+      if (err) {
+        return callback(err);
+      }
+      return callback(null, { result: "success" });
+    })
+  },
   update: (id, orderData, callback) => {
     const queryOrderUpdate = `UPDATE orders SET total_price = ${orderData.total_price}, status = ${orderData.status} WHERE order_id = ${id}`;
     db.query(queryOrderUpdate, (err, result) => {
       if (err) {
         return callback(err);
       }
-
+      if (orderData.removedItems.length != 0) {
+        orderData.removedItems.forEach(item => {
+          const queryRemovedItem = `UPDATE order_items SET status = 0 where order_item_id = ${item}`
+          db.query(queryRemovedItem, (err, result) => {
+            if (err) {
+              callback(err)
+            }
+          })
+        })
+      }
+      if (orderData.removedToppings.length != 0) {
+        orderData.removedToppings.forEach(topping => {
+          const removedToppings = `UPDATE order_items SET order_id = 0 where order_topping_id = ${topping}`
+          db.query(removedToppings, (err, result) => {
+            if (err) {
+              callback(err)
+            }
+          })
+        })
+      }
       if (orderData.items.length > 0) {
         let itemValues = [];
         orderData.items.forEach(item => {
@@ -140,18 +218,18 @@ const Order = {
             if (orderData.toppings.length > 0) {
               let toppingValues = [];
               orderData.toppings.forEach(topping => {
-                toppingValues.push(`(${topping.order_topping_id || 'NULL'}, ${topping.item_id}, ${id}, ${topping.quantity}, ${topping.price})`);
+                toppingValues.push(`(${topping.order_topping_id || 'NULL'}, ${topping.item_id},${topping.topping_id}, ${id}, ${topping.quantity}, ${topping.price})`);
               });
 
               if (toppingValues.length > 0) {
                 let queryOrderToppings = `
-                                INSERT INTO order_toppings (order_topping_id, item_id, order_id, quantity, price)
+                                INSERT INTO order_toppings (order_topping_id, item_id, topping_id, order_id, quantity, price)
                                 VALUES ${toppingValues.join(', ')}
                                 ON DUPLICATE KEY UPDATE
+
                                     quantity = VALUES(quantity),
                                     price = VALUES(price);
                             `;
-
                 db.query(queryOrderToppings, (err, result) => {
                   if (err) {
                     return callback(err);
@@ -225,74 +303,6 @@ const Order = {
       }
     });
   },
-
-
-  // update: (id, orderData, callback) => {
-  //   console.log(orderData);
-
-  //   const query = 'UPDATE orders SET ? WHERE order_id = ?';
-
-  //   var price = 0;
-  //   //update items
-  //   if (orderData.items != null) {
-  //     for (let i = 0; i < orderData.items.length; i++) {
-  //       if (orderData.items[i].order_item_id == null) {
-  //         const query = 'INSERT INTO order_items SET ?';
-  //         orderData.items[i].order_id = id
-  //         db.query(query, orderData.items[i], (err, result) => {
-  //           if (err) {
-  //             callback(err)
-  //           }
-  //         })
-  //       } else {
-  //         const query = 'UPDATE order_items SET ? WHERE order_item_id = ?';
-  //         db.query(query, [orderData.items[i], orderData.items[i].order_item_id], (err, result) => {
-  //           if (err) {
-  //             callback(err)
-  //           }
-  //         })
-  //       }
-  //       price += orderData.items[i].price
-  //     }
-  //   }
-
-  //   //update toppings
-
-  //   if (orderData.toppings != null) {
-  //     for (let i = 0; i < orderData.toppings.length; i++) {
-  //       if (orderData.toppings[i].order_topping_id == null) {
-  //         const query = 'INSERT INTO order_toppings SET ?';
-  //         orderData.toppings[i].order_id = id
-  //         db.query(query, orderData.toppings[i], (err, result) => {
-  //           if (err) {
-  //             callback(err)
-  //           }
-  //         })
-  //       } else {
-  //         const query = 'UPDATE order_toppings SET ? WHERE order_topping_id = ?';
-  //         db.query(query, [orderData.toppings[i], orderData.toppings[i].order_topping_id], (err, result) => {
-  //           if (err) {
-  //             callback(err)
-  //           }
-  //         })
-  //       }
-  //       price += orderData.toppings[i].price
-  //     }
-  //   }
-
-
-
-  //   delete orderData.order_id;
-  //   delete orderData.date_added;
-  //   delete orderData.items;
-  //   delete orderData.toppings;
-
-  //   orderData.total_price = price;
-
-  //   db.query(query, [orderData, id], callback);
-
-  // },
-
   delete: (id, callback) => {
     const query = 'DELETE FROM orders WHERE orders_id = ?';
     db.query(query, [id], callback);

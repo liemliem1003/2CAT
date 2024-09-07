@@ -5,7 +5,8 @@ const getAllItems = (req, res) => {
  
   const limit = req.query.limit;
   const paging = req.query.paging;
-  const isGetAll = req.query.isgetall;
+  const isGetAll = req.query.isgetall == "true" ? true : false;
+
 
   Item.getAll(limit,paging,isGetAll,(err, results) => {
     if (err) {
@@ -34,7 +35,9 @@ const createItem = (req, res) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.status(201).json({ id: result.insertId, ...newItem });
+    res.status(201).json({
+      code:201,
+      message: "Create item successfully" });
   });
 };
 
